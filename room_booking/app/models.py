@@ -159,6 +159,9 @@ class Booking(db.Model):
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
 
+    recurrence_rule = db.Column(db.String(20), nullable=True)
+    series_id = db.Column(db.String(36), nullable=True)
+
     # Index for fast searching
     __table_args__ = (
         db.Index("idx_booking_room_time", "room_id", "start_time", "end_time"),
@@ -191,6 +194,8 @@ class Booking(db.Model):
             "attendees_count": self.attendees_count,
             "duration_hours": round(self.duration_hours, 2),
             "total_cost": round(self.total_cost, 2),
+            "recurrence_rule": self.recurrence_rule,
+            "series_id": self.series_id,
         }
         if include_room:
             data["room"] = self.room.to_dict(include_equipment=False)

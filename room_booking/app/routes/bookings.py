@@ -2,7 +2,8 @@
 API endpoints for bookings.
 """
 
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 
 from flask import Blueprint, jsonify, request
 
@@ -126,23 +127,89 @@ def create_booking():
 
     # Create booking
     try:
-        booking = Booking(
-            room_id=room.id,
-            user_id=user.id,
-            title=data["title"],
-            description=data.get("description"),
-            start_time=start_time,
-            end_time=end_time,
-            attendees_count=attendees,
-        )
+        recurrence_rule = data.get("recurrence_rule")
 
-        db.session.add(booking)
-        db.session.commit()
+        occurrences = data.get("occurrences")
 
-        return jsonify({
-            "message": "Booking created",
-            "booking": booking.to_dict(include_room=True),
-        }), 201
+        if recurrence_rule and occurrences:
+            is_recurring = True
+        else:
+            is_recurring = False
+
+        if is_recurring:
+            series_id = str(uuid.uuid4())
+
+            duration = end_time - start_time
+            recurring_slots = []
+
+            for i in range(int(occurrences)):
+                occurrence_start = start_time + timedelta(days=7 * i)
+                occurrence_end = occurrence_start + duration
+
+                recurring_slots.append({
+                    "start_time": occurrence_start,
+                    "end_time": occurrence_end,
+                })
+
+            for slot in recurring_slots:
+                if not room.is_available(slot["start_time"], slot["end_time"]):
+                    return jsonify({
+                        "error": "Room is already booked at this time",
+                        "conflicts": get_conflicts(
+                            room.id, slot["start_time"], slot["end_time"]
+                        ),
+                    }), 409
+
+            new_bookings = []
+
+            for slot in recurring_slots:
+                booking = Booking(
+                    room_id=room.id,
+                    user_id=user.id,
+                    title=data["title"],
+                    description=data.get("description"),
+                    start_time=slot["start_time"],
+                    end_time=slot["end_time"],
+                    attendees_count=attendees,
+                    recurrence_rule=recurrence_rule,
+                    series_id=series_id,
+                )
+                new_bookings.append(booking)
+
+            db.session.add_all(new_bookings)
+            db.session.commit()
+
+            return jsonify({
+                "message": "Recurring bookings created",
+                "series_id": series_id,
+                "bookings": [
+                    booking.to_dict(include_room=True)
+                    for booking in new_bookings
+                ],
+            }), 201
+
+        else:
+            series_id = None
+
+            booking = Booking(
+                room_id=room.id,
+                user_id=user.id,
+                title=data["title"],
+                description=data.get("description"),
+                start_time=start_time,
+                end_time=end_time,
+                attendees_count=attendees,
+                recurrence_rule=recurrence_rule,
+                series_id=series_id,
+            )
+
+            db.session.add(booking)
+            db.session.commit()
+
+            return jsonify({
+                "message": "Booking created",
+                "booking": booking.to_dict(include_room=True),
+            }), 201
 
     except Exception as e:
         db.session.rollback()
