@@ -5,6 +5,7 @@ Models for room booking system.
 from datetime import datetime
 
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import event, select
 
 db = SQLAlchemy()
 
@@ -198,6 +199,26 @@ class Booking(db.Model):
         return data
 
 
+# --- Task 04: Notifications ---
+class Notification(db.Model):
+    __tablename__ = "notifications"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    message = db.Column(db.String(255), nullable=False)
+    is_read = db.Column(db.Boolean, default=False, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    booking_id = db.Column(
+        db.Integer, db.ForeignKey("bookings.id"), nullable=True
+    )
+    notification_type = db.Column(
+        db.String(50)
+    )  # e.g. "booking_reminder", "booking_update"
+
+    user = db.relationship("User", backref="notifications")
+    booking = db.relationship("Booking", backref="notifications")
+
+
 # --- HELPER FUNCTIONS ---
 
 
@@ -305,3 +326,25 @@ def get_booking_statistics(start_date=None, end_date=None):
             for w in weekday_stats
         ],
     }
+
+
+# --- Task 04: Notifications ---
+@event.listens_for(Booking, "after_insert")
+def booking_after_insert(mapper, connection, target):
+    admin_id = connection.execute(
+        select(User.id).where(User.is_admin == True)
+    ).scalar()
+
+    if admin_id is None:
+        return
+
+    connection.execute(
+        Notification.__table__.insert().values(
+            user_id=admin_id,
+            message=f"New booking created: {target.title}",
+            is_read=False,
+            booking_id=target.id,
+            notification_type="booking_created",
+            created_at=datetime.now(),
+        )
+    )

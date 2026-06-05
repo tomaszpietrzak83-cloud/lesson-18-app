@@ -18,7 +18,9 @@ def create_app(config=None):
 
     from app.routes.bookings import bookings_bp
     from app.routes.dashboard import dashboard_bp
+    from app.routes.notifications import notification_bp
 
+    app.register_blueprint(notification_bp)
     app.register_blueprint(bookings_bp)
     app.register_blueprint(dashboard_bp)
 
