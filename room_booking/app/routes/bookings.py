@@ -63,6 +63,60 @@ def get_bookings():
     })
 
 
+@bookings_bp.route("/series/<series_id>/cancel", methods=["POST"])
+def cancel_series(series_id):
+    bookings = Booking.query.filter_by(series_id=series_id).all()
+
+    if not bookings:
+        return jsonify({"error": "Series not found"}), 404
+
+    cancelled_count = 0
+
+    for booking in bookings:
+        if (
+            booking.status != "cancelled"
+            and booking.start_time > datetime.now()
+        ):
+            booking.status = "cancelled"
+            cancelled_count += 1
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "message": f"Cancelled {cancelled_count} bookings in series"
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@bookings_bp.route("/<int:id>/cancel", methods=["POST"])
+def cancel_single_occurrence(id):
+    booking = Booking.query.get(id)
+
+    if not booking:
+        return jsonify({"error": "Booking not found"}), 404
+
+    if booking.status == "cancelled":
+        return jsonify({"error": "Booking is already cancelled"}), 400
+
+    if booking.start_time <= datetime.now():
+        return jsonify({"error": "Past bookings cannot be cancelled"}), 400
+
+    booking.status = "cancelled"
+
+    try:
+        db.session.commit()
+        return jsonify({
+            "message": "Booking cancelled",
+            "booking_id": booking.id,
+            "series_id": booking.series_id,
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
 @bookings_bp.route("/", methods=["POST"])
 def create_booking():
     """
@@ -129,7 +183,32 @@ def create_booking():
     try:
         recurrence_rule = data.get("recurrence_rule")
 
-        occurrences = data.get("occurrences")
+        raw_occurrences = data.get("occurrences", 0)
+
+        try:
+            occurrences = int(raw_occurrences)
+        except (TypeError, ValueError):
+            return jsonify({"error": "occurrences must be an integer"}), 400
+
+        if recurrence_rule and not occurrences:
+            return jsonify({
+                "error": "Recurring bookings require occurrences"
+            }), 400
+
+        if recurrence_rule and occurrences < 2:
+            return jsonify({
+                "error": "Recurring bookings require occurrences >= 2"
+            }), 400
+
+        if recurrence_rule not in (None, "WEEKLY", "BIWEEKLY"):
+            return jsonify({"error": "Invalid recurrence_rule"}), 400
+
+        if recurrence_rule == "WEEKLY":
+            step_days = 7
+        elif recurrence_rule == "BIWEEKLY":
+            step_days = 14
+        else:
+            step_days = 0
 
         if recurrence_rule and occurrences:
             is_recurring = True
@@ -142,8 +221,8 @@ def create_booking():
             duration = end_time - start_time
             recurring_slots = []
 
-            for i in range(int(occurrences)):
-                occurrence_start = start_time + timedelta(days=7 * i)
+            for i in range(occurrences):
+                occurrence_start = start_time + timedelta(days=step_days * i)
                 occurrence_end = occurrence_start + duration
 
                 recurring_slots.append({
